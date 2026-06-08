@@ -81,20 +81,44 @@
     });
 
     // --- Download button ---
-    downloadBtn.addEventListener('click', () => {
+    downloadBtn.addEventListener('click', async () => {
         if (!currentVideo?.downloadUrl) {
             showError('No download link available for this video.');
             return;
         }
 
-        // Use the proxy download endpoint with the direct video URL
+        const originalText = downloadBtn.innerHTML;
+        downloadBtn.disabled = true;
+        downloadBtn.innerHTML = '<span class="spinner"></span> Downloading...';
+
         const proxyUrl = `/api/download?videoUrl=${encodeURIComponent(currentVideo.downloadUrl)}&title=${encodeURIComponent(currentVideo.title)}`;
-        const a = document.createElement('a');
-        a.href = proxyUrl;
-        a.setAttribute('download', '');
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+
+        try {
+            // Try fetching through proxy first
+            const res = await fetch(proxyUrl);
+
+            if (res.ok) {
+                const blob = await res.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                const safeTitle = currentVideo.title.substring(0, 50).replace(/[^a-zA-Z0-9]/g, '_');
+                a.href = url;
+                a.download = `${safeTitle || 'video'}.mp4`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                window.URL.revokeObjectURL(url);
+            } else {
+                // Fallback: If proxy fails, try direct download in new tab
+                window.open(currentVideo.downloadUrl, '_blank');
+            }
+        } catch (err) {
+            // Fallback for any fetch error
+            window.open(currentVideo.downloadUrl, '_blank');
+        } finally {
+            downloadBtn.disabled = false;
+            downloadBtn.innerHTML = originalText;
+        }
     });
 
     // --- Helpers ---
