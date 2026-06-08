@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SnapTok — TikTok Video Downloader</title>
+  <meta name="description" content="Download TikTok videos instantly. Paste a link, click download. Free, fast, no watermark.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Animated background -->
+  <div class="bg-grid"></div>
+  <div class="blob blob-1"></div>
+  <div class="blob blob-2"></div>
+  <div class="blob blob-3"></div>
+
+  <main>
+    <!-- Hero -->
+    <header class="hero">
+      <div class="logo">
+        <svg class="logo-icon" width="40" height="40" viewBox="0 0 40 40" fill="none">
+          <rect width="40" height="40" rx="12" fill="url(#logoGrad)"/>
+          <path d="M28 16.5c-1.5.8-3.2 1.2-5 1.3V13h-4v14.5c0 1.7-1.3 3-3 3s-3-1.3-3-3 1.3-3 3-3c.4 0 .7.1 1 .2V20.5c-.3 0-.7-.1-1-.1-3.9 0-7 3.1-7 7s3.1 7 7 7 7-3.1 7-7V20c1.8 1.2 3.9 1.8 6 1.8v-4c-.3 0-1-.3-1-1.3z" fill="white"/>
+          <defs>
+            <linearGradient id="logoGrad" x1="0" y1="0" x2="40" y2="40">
+              <stop stop-color="#ff2d55"/>
+              <stop offset="1" stop-color="#25f4ee"/>
+            </linearGradient>
+          </defs>
+        </svg>
+        <span class="logo-text">SnapTok</span>
+      </div>
+      <h1>Download TikTok Videos <span class="gradient-text">Instantly</span></h1>
+      <p class="subtitle">Paste a TikTok link. Get the video. It's that simple.</p>
+    </header>
+
+    <!-- Download Card -->
+    <section class="download-card" id="downloadCard">
+      <form id="downloadForm" autocomplete="off">
+        <div class="input-group">
+          <div class="input-wrapper">
+            <svg class="input-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+              <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+            </svg>
+            <input
+              type="url"
+              id="urlInput"
+              placeholder="Paste TikTok link here..."
+              required
+              spellcheck="false"
+            />
+            <button type="button" id="pasteBtn" class="paste-btn" title="Paste from clipboard">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+              </svg>
+              Paste
+            </button>
+          </div>
+          <button type="submit" id="submitBtn" class="submit-btn">
+            <span class="btn-text">Download</span>
+            <span class="btn-loader" hidden>
+              <span class="spinner"></span>
+            </span>
+          </button>
+        </div>
+      </form>
+
+      <!-- Error message -->
+      <div class="error-msg" id="errorMsg" hidden></div>
+
+      <!-- Video preview -->
+      <div class="preview" id="preview" hidden>
+        <div class="preview-card">
+          <img id="previewThumb" class="preview-thumb" alt="Video thumbnail" />
+          <div class="preview-info">
+            <h3 id="previewTitle" class="preview-title"></h3>
+            <p id="previewAuthor" class="preview-author"></p>
+            <p id="previewDuration" class="preview-duration"></p>
+          </div>
+        </div>
+        <button id="downloadBtn" class="download-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Save Video
+        </button>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section class="how-it-works">
+      <h2>How It Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <h3>Copy Link</h3>
+          <p>Open TikTok and copy the share link of any video.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <h3>Paste Here</h3>
+          <p>Paste the link into the field above and hit Download.</p>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <h3>Save Video</h3>
+          <p>Preview the video info and save it to your device.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <p>SnapTok &mdash; Free TikTok video downloader. Not affiliated with TikTok.</p>
+    </footer>
+  </main>
+
+  <script src="/script.js"></script>
+</body>
+</html>
