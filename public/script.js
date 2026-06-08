@@ -16,7 +16,7 @@
     const previewDuration = document.getElementById('previewDuration');
     const downloadBtn = document.getElementById('downloadBtn');
 
-    let currentUrl = '';
+    let currentVideo = null;
 
     // --- Paste button ---
     pasteBtn.addEventListener('click', async () => {
@@ -67,7 +67,11 @@
                 throw new Error(data.error || 'Something went wrong.');
             }
 
-            currentUrl = url;
+            currentVideo = {
+                url: url,
+                downloadUrl: data.downloadUrl,
+                title: data.title
+            };
             showPreview(data);
         } catch (err) {
             showError(err.message || 'Failed to fetch video info. Please try again.');
@@ -78,12 +82,15 @@
 
     // --- Download button ---
     downloadBtn.addEventListener('click', () => {
-        if (!currentUrl) return;
+        if (!currentVideo?.downloadUrl) {
+            showError('No download link available for this video.');
+            return;
+        }
 
-        // Use the proxy download endpoint
-        const downloadUrl = `/api/download?url=${encodeURIComponent(currentUrl)}`;
+        // Use the proxy download endpoint with the direct video URL
+        const proxyUrl = `/api/download?videoUrl=${encodeURIComponent(currentVideo.downloadUrl)}&title=${encodeURIComponent(currentVideo.title)}`;
         const a = document.createElement('a');
-        a.href = downloadUrl;
+        a.href = proxyUrl;
         a.setAttribute('download', '');
         document.body.appendChild(a);
         a.click();
