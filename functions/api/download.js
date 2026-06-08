@@ -1,5 +1,7 @@
 // Cloudflare Pages Function: GET /api/download
-// Proxies the TikTok video stream to the user with Range support
+// Proxies the TikTok video stream to the user with Mobile UA and Range support
+
+const MOBILE_UA = 'com.zhiliaoapp.musically/2022405040 (Linux; U; Android 12; en_US; Pixel 6 Build/SD1A.210817.036; Cronet/58.0.2991.0)';
 
 function jsonResponse(data, status = 200) {
     return new Response(JSON.stringify(data), {
@@ -14,21 +16,17 @@ export async function onRequestGet(context) {
     const title = url.searchParams.get('title') || 'tiktok_video';
 
     if (!videoUrl) {
-        return jsonResponse({ error: 'Please provide a video URL.' }, 400);
+        return jsonResponse({ error: 'Missing video URL.' }, 400);
     }
 
-    // Capture the Range header from the user's browser
     const rangeHeader = context.request.headers.get('Range');
 
     try {
         const fetchHeaders = {
-            'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'User-Agent': MOBILE_UA,
             'Referer': 'https://www.tiktok.com/',
-            'Accept-Encoding': 'identity',
         };
 
-        // Forward the Range header if it exists
         if (rangeHeader) {
             fetchHeaders['Range'] = rangeHeader;
         }
@@ -38,27 +36,26 @@ export async function onRequestGet(context) {
             redirect: 'follow'
         });
 
-        if (!videoRes.ok && videoRes.status !== 206) {
-            return jsonResponse({ error: 'Failed to stream the video from TikTok.' }, 502);
+        // 403 usually means TikTok blocked the datacenter IP
+        if (videoRes.status === 403) {
+            // Fallback: tell the browser to try fetching it directly
+            // This might fail due to CORS but is better than a certain failure
+            return Response.redirect(videoUrl, 302);
         }
 
-        const safeTitle = title
-            .substring(0, 60)
-            .replace(/[^a-zA-Z0-9 _-]/g, '')
-            .trim()
-            .replace(/\s+/g, '_');
-        const filename = `${safeTitle || 'tiktok_video'}.mp4`;
+        if (!videoRes.ok && videoRes.status !== 206) {
+            return jsonResponse({ error: `TikTok server returned ${videoRes.status}` }, 502);
+        }
 
-        // Set up response headers, forwarding important ones from TikTok
+        const safeTitle = title.substring(0, 50).replace(/[^a-zA-Z0-9]/g, '_');
+        const filename = `${safeTitle || 'video'}.mp4`;
+
         const responseHeaders = new Headers();
         responseHeaders.set('Content-Type', 'video/mp4');
         responseHeaders.set('Content-Disposition', `attachment; filename="${filename}"`);
-        responseHeaders.set('Cache-Control', 'no-store');
-        responseHeaders.set('Access-Control-Allow-Origin', '*');
 
-        // Forward range-related headers back to the browser
-        const rangeHeaders = ['Content-Range', 'Accept-Ranges', 'Content-Length'];
-        rangeHeaders.forEach(h => {
+        // Forward essential headers
+        ['Content-Range', 'Accept-Ranges', 'Content-Length'].forEach(h => {
             const val = videoRes.headers.get(h);
             if (val) responseHeaders.set(h, val);
         });
@@ -67,8 +64,8 @@ export async function onRequestGet(context) {
             status: videoRes.status,
             headers: responseHeaders,
         });
+
     } catch (err) {
-        console.error('Download endpoint error:', err);
-        return jsonResponse({ error: 'An unexpected error occurred.' }, 500);
+        return jsonResponse({ error: 'Proxy error.' }, 500);
     }
 }
