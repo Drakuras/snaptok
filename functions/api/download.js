@@ -1,5 +1,5 @@
 // Cloudflare Pages Function: GET /api/download
-// Proxies the TikTok video stream to the user
+// Proxies the TikTok video stream to the user with Range support
 
 function jsonResponse(data, status = 200) {
     return new Response(JSON.stringify(data), {
@@ -17,23 +17,31 @@ export async function onRequestGet(context) {
         return jsonResponse({ error: 'Please provide a video URL.' }, 400);
     }
 
-    try {
-        // Proxy the video stream with TikTok referer so it's not blocked
-        const videoRes = await fetch(videoUrl, {
-            headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-                'Referer': 'https://www.tiktok.com/',
-                'Accept-Encoding': 'identity',
-            },
-        });
+    // Capture the Range header from the user's browser
+    const rangeHeader = context.request.headers.get('Range');
 
-        if (!videoRes.ok) {
-            // If direct proxy fails, it might be due to an expired token or restricted IP
-            return jsonResponse({ error: 'Failed to stream the video. It may be restricted.' }, 502);
+    try {
+        const fetchHeaders = {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Referer': 'https://www.tiktok.com/',
+            'Accept-Encoding': 'identity',
+        };
+
+        // Forward the Range header if it exists
+        if (rangeHeader) {
+            fetchHeaders['Range'] = rangeHeader;
         }
 
-        // Build a safe filename
+        const videoRes = await fetch(videoUrl, {
+            headers: fetchHeaders,
+            redirect: 'follow'
+        });
+
+        if (!videoRes.ok && videoRes.status !== 206) {
+            return jsonResponse({ error: 'Failed to stream the video from TikTok.' }, 502);
+        }
+
         const safeTitle = title
             .substring(0, 60)
             .replace(/[^a-zA-Z0-9 _-]/g, '')
@@ -41,14 +49,23 @@ export async function onRequestGet(context) {
             .replace(/\s+/g, '_');
         const filename = `${safeTitle || 'tiktok_video'}.mp4`;
 
-        // Return the stream with proper headers for download
+        // Set up response headers, forwarding important ones from TikTok
+        const responseHeaders = new Headers();
+        responseHeaders.set('Content-Type', 'video/mp4');
+        responseHeaders.set('Content-Disposition', `attachment; filename="${filename}"`);
+        responseHeaders.set('Cache-Control', 'no-store');
+        responseHeaders.set('Access-Control-Allow-Origin', '*');
+
+        // Forward range-related headers back to the browser
+        const rangeHeaders = ['Content-Range', 'Accept-Ranges', 'Content-Length'];
+        rangeHeaders.forEach(h => {
+            const val = videoRes.headers.get(h);
+            if (val) responseHeaders.set(h, val);
+        });
+
         return new Response(videoRes.body, {
-            headers: {
-                'Content-Type': 'video/mp4',
-                'Content-Disposition': `attachment; filename="${filename}"`,
-                'Cache-Control': 'no-store',
-                'Access-Control-Allow-Origin': '*',
-            },
+            status: videoRes.status,
+            headers: responseHeaders,
         });
     } catch (err) {
         console.error('Download endpoint error:', err);
