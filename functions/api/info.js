@@ -16,14 +16,56 @@ function detectPlatform(url) {
     return null;
 }
 
+const TIKTOK_MOBILE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1';
+
+async function parseTikTokPage(url) {
+    const res = await fetch(url, {
+        redirect: 'follow',
+        headers: {
+            'User-Agent': TIKTOK_MOBILE_UA,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+    });
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const match = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+    if (!match) return null;
+
+    let data;
+    try { data = JSON.parse(match[1]); } catch { return null; }
+
+    const detail = data?.['__DEFAULT_SCOPE__']?.['webapp.video-detail'];
+    const item = detail?.itemInfo?.itemStruct || detail?.itemInfo?.item;
+    if (!item?.video) return null;
+
+    const downloadUrl = item.video.downloadAddr || item.video.playAddr;
+    if (!downloadUrl) return null;
+
+    return {
+        platform: 'tiktok',
+        title: item.desc || 'TikTok Video',
+        thumbnail: item.video.cover || item.video.originCover || null,
+        duration: item.video.duration || 0,
+        author: item.author?.uniqueId || item.author?.nickname || 'Unknown',
+        downloadUrl
+    };
+}
+
 async function handleTikTok(url) {
+    // Try direct page extraction first — no third-party, no rate limits
+    const direct = await parseTikTokPage(url).catch(() => null);
+    if (direct) return direct;
+
+    // Fall back to TikWM if page parsing failed
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
-    if (!res.ok) throw new Error('API bridge unavailable. Try again later.');
+    if (!res.ok) throw new Error('Could not fetch video info. Please try again.');
 
     const data = await res.json();
-    if (data.code !== 0 || !data.data) throw new Error(data.msg || 'Could not find video data.');
+    if (data.code !== 0 || !data.data) throw new Error('Could not find video data. The video may be private or unavailable.');
 
     const v = data.data;
     return {
