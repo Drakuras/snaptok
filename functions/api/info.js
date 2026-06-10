@@ -18,21 +18,26 @@ function detectPlatform(url) {
 
 const TIKTOK_APP_UA = 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet';
 
-async function resolveTikTokVideoId(url) {
-    const direct = new URL(url).pathname.match(/\/video\/(\d+)/);
-    if (direct) return direct[1];
-    // Short URLs (vm.tiktok.com, tiktok.com/t/xxx) — follow the redirect
-    const res = await fetch(url, {
-        redirect: 'follow',
-        headers: { 'User-Agent': TIKTOK_APP_UA }
-    });
-    const match = new URL(res.url).pathname.match(/\/video\/(\d+)/);
-    return match?.[1] ?? null;
-}
-
 async function handleTikTok(url) {
-    const awemeId = await resolveTikTokVideoId(url).catch(() => null);
+    // Step 1: oEmbed resolves any URL format (short links, long URLs) from any IP
+    // and gives us the video ID embedded in the HTML field plus metadata.
+    let awemeId = null;
+    let meta = {};
+    try {
+        const oembedRes = await fetch(`https://www.tiktok.com/oembed?url=${encodeURIComponent(url)}`);
+        if (oembedRes.ok) {
+            const oembed = await oembedRes.json();
+            awemeId = oembed.html?.match(/\/video\/(\d+)/)?.[1] ?? null;
+            meta = { title: oembed.title, author: oembed.author_name, thumbnail: oembed.thumbnail_url };
+        }
+    } catch {}
 
+    // Fallback ID extraction for standard long-form URLs
+    if (!awemeId) {
+        awemeId = new URL(url).pathname.match(/\/video\/(\d+)/)?.[1] ?? null;
+    }
+
+    // Step 2: call TikTok's own mobile API with the resolved ID — no IP-based rate limit
     if (awemeId) {
         try {
             const apiRes = await fetch(
@@ -42,22 +47,19 @@ async function handleTikTok(url) {
                 `&device_platform=iphone&device_type=iPhone14,5&os_version=15.6.1`,
                 { headers: { 'User-Agent': TIKTOK_APP_UA } }
             );
-
             if (apiRes.ok) {
                 const apiData = await apiRes.json();
                 const item = apiData?.aweme_list?.[0];
                 const downloadUrl = item?.video?.play_addr?.url_list?.[0]
                                  || item?.video?.download_addr?.url_list?.[0];
-
                 if (item && downloadUrl) {
                     const rawDuration = item.video?.duration || 0;
                     return {
                         platform: 'tiktok',
-                        title: item.desc || 'TikTok Video',
-                        thumbnail: item.video?.cover?.url_list?.[0] || null,
-                        // TikTok API returns duration in milliseconds
+                        title: meta.title || item.desc || 'TikTok Video',
+                        thumbnail: meta.thumbnail || item.video?.cover?.url_list?.[0] || null,
                         duration: rawDuration > 1000 ? Math.round(rawDuration / 1000) : rawDuration,
-                        author: item.author?.unique_id || item.author?.nickname || 'Unknown',
+                        author: meta.author || item.author?.unique_id || item.author?.nickname || 'Unknown',
                         downloadUrl
                     };
                 }
@@ -65,7 +67,7 @@ async function handleTikTok(url) {
         } catch {}
     }
 
-    // Fall back to TikWM if the direct API didn't work
+    // Step 3: last resort — TikWM (may be rate-limited on shared CF IPs)
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
