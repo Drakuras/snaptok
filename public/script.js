@@ -32,7 +32,8 @@
     // --- Auto-detect paste ---
     urlInput.addEventListener('paste', () => {
         setTimeout(() => {
-            if (isTikTokUrl(urlInput.value.trim())) {
+            const val = urlInput.value.trim();
+            if (isTikTokUrl(val) || isYouTubeUrl(val)) {
                 form.requestSubmit();
             }
         }, 100);
@@ -45,8 +46,8 @@
 
         if (!url) return;
 
-        if (!isTikTokUrl(url)) {
-            showError('Please enter a valid TikTok URL.');
+        if (!isTikTokUrl(url) && !isYouTubeUrl(url)) {
+            showError('Please enter a valid TikTok or YouTube URL.');
             return;
         }
 
@@ -70,7 +71,8 @@
             currentVideo = {
                 url: url,
                 downloadUrl: data.downloadUrl,
-                title: data.title
+                title: data.title,
+                platform: data.platform
             };
             showPreview(data);
         } catch (err) {
@@ -87,46 +89,51 @@
             return;
         }
 
-        const originalText = downloadBtn.innerHTML;
+        const originalHTML = downloadBtn.innerHTML;
         downloadBtn.disabled = true;
         downloadBtn.innerHTML = '<span class="spinner"></span> Downloading...';
 
         const proxyUrl = `/api/download?videoUrl=${encodeURIComponent(currentVideo.downloadUrl)}&title=${encodeURIComponent(currentVideo.title)}`;
 
         try {
-            // Try fetching through proxy first
             const res = await fetch(proxyUrl);
 
             if (res.ok) {
                 const blob = await res.blob();
-                const url = window.URL.createObjectURL(blob);
+                const blobUrl = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 const safeTitle = currentVideo.title.substring(0, 50).replace(/[^a-zA-Z0-9]/g, '_');
-                a.href = url;
+                a.href = blobUrl;
                 a.download = `${safeTitle || 'video'}.mp4`;
                 document.body.appendChild(a);
                 a.click();
                 document.body.removeChild(a);
-                window.URL.revokeObjectURL(url);
+                window.URL.revokeObjectURL(blobUrl);
             } else {
-                // Fallback: If proxy fails, try direct download in new tab
                 window.open(currentVideo.downloadUrl, '_blank');
             }
-        } catch (err) {
-            // Fallback for any fetch error
+        } catch {
             window.open(currentVideo.downloadUrl, '_blank');
         } finally {
             downloadBtn.disabled = false;
-            downloadBtn.innerHTML = originalText;
+            downloadBtn.innerHTML = originalHTML;
         }
     });
 
     // --- Helpers ---
     function isTikTokUrl(url) {
         try {
-            const parsed = new URL(url);
-            return /tiktok\.com$/i.test(parsed.hostname) ||
-                /\.tiktok\.com$/i.test(parsed.hostname);
+            const { hostname } = new URL(url);
+            return /tiktok\.com$/i.test(hostname) || /\.tiktok\.com$/i.test(hostname);
+        } catch {
+            return false;
+        }
+    }
+
+    function isYouTubeUrl(url) {
+        try {
+            const { hostname } = new URL(url);
+            return /youtube\.com$/i.test(hostname) || /youtu\.be$/i.test(hostname);
         } catch {
             return false;
         }
@@ -148,11 +155,15 @@
     }
 
     function showPreview(data) {
-        previewTitle.textContent = data.title || 'TikTok Video';
-        previewAuthor.textContent = data.author ? `@${data.author}` : '';
-        previewDuration.textContent = data.duration
-            ? formatDuration(data.duration)
-            : '';
+        previewTitle.textContent = data.title || 'Video';
+
+        if (data.platform === 'youtube') {
+            previewAuthor.textContent = data.author || '';
+        } else {
+            previewAuthor.textContent = data.author ? `@${data.author}` : '';
+        }
+
+        previewDuration.textContent = data.duration ? formatDuration(data.duration) : '';
 
         if (data.thumbnail) {
             previewThumb.src = data.thumbnail;
