@@ -36,47 +36,68 @@ async function handleTikTok(url) {
     };
 }
 
-async function handleYouTube(url) {
-    const [metaRes, cobaltRes] = await Promise.all([
-        fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`),
-        fetch('https://api.cobalt.tools/', {
-            method: 'POST',
-            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                url,
-                videoQuality: '720',
-                youtubeVideoCodec: 'h264',
-                filenameStyle: 'basic'
-            })
+function extractYouTubeId(url) {
+    try {
+        const parsed = new URL(url);
+        if (/youtu\.be$/.test(parsed.hostname)) return parsed.pathname.slice(1).split('?')[0];
+        return parsed.searchParams.get('v');
+    } catch { return null; }
+}
+
+async function fetchYouTubePlayer(videoId) {
+    const res = await fetch('https://www.youtube.com/youtubei/v1/player', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1 like Mac OS X)',
+        },
+        body: JSON.stringify({
+            videoId,
+            context: {
+                client: {
+                    clientName: 'IOS',
+                    clientVersion: '19.45.4',
+                    deviceModel: 'iPhone16,2',
+                    hl: 'en',
+                    gl: 'US'
+                }
+            }
         })
+    });
+    if (!res.ok) throw new Error(`YouTube API returned ${res.status}`);
+    return res.json();
+}
+
+async function handleYouTube(url) {
+    const videoId = extractYouTubeId(url);
+    if (!videoId) throw new Error('Could not parse YouTube video ID from URL.');
+
+    const [metaRes, player] = await Promise.all([
+        fetch(`https://www.youtube.com/oembed?url=${encodeURIComponent('https://www.youtube.com/watch?v=' + videoId)}&format=json`),
+        fetchYouTubePlayer(videoId)
     ]);
 
-    if (!metaRes.ok) throw new Error('Could not fetch YouTube video info. The video may be private or unavailable.');
-
-    const meta = await metaRes.json();
-    const cobalt = await cobaltRes.json();
-
-    let downloadUrl = null;
-    if (cobalt.status === 'stream' || cobalt.status === 'tunnel' || cobalt.status === 'redirect') {
-        downloadUrl = cobalt.url;
-    } else if (cobalt.status === 'picker' && cobalt.picker?.length) {
-        // Pick the first video stream from the picker (avoid audio-only entries)
-        const videoItem = cobalt.picker.find(p => p.type === 'video') || cobalt.picker[0];
-        downloadUrl = videoItem?.url || null;
+    if (player.playabilityStatus?.status !== 'OK') {
+        throw new Error(player.playabilityStatus?.reason || 'This video is not available.');
     }
 
-    if (!downloadUrl) {
-        const reason = cobalt.error?.code || 'unknown';
-        throw new Error(`Could not get download link (${reason}). The video may be age-restricted, private, or unavailable.`);
-    }
+    const formats = player.streamingData?.formats || [];
+    // itag 22 = 720p MP4 combined stream, itag 18 = 360p MP4 combined stream
+    const format = formats.find(f => f.itag === 22)
+                || formats.find(f => f.itag === 18)
+                || formats.find(f => f.mimeType?.startsWith('video/mp4') && f.url);
+
+    if (!format?.url) throw new Error('Could not extract a download link for this video.');
+
+    const meta = metaRes.ok ? await metaRes.json() : {};
 
     return {
         platform: 'youtube',
-        title: meta.title || 'YouTube Video',
-        thumbnail: meta.thumbnail_url || null,
-        duration: 0,
-        author: meta.author_name || 'Unknown',
-        downloadUrl
+        title: meta.title || player.videoDetails?.title || 'YouTube Video',
+        thumbnail: meta.thumbnail_url || `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`,
+        duration: parseInt(player.videoDetails?.lengthSeconds) || 0,
+        author: meta.author_name || player.videoDetails?.author || 'Unknown',
+        downloadUrl: format.url
     };
 }
 
