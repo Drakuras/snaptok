@@ -16,11 +16,60 @@ function detectPlatform(url) {
     return null;
 }
 
+const TIKTOK_APP_UA = 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet';
+
+async function resolveTikTokVideoId(url) {
+    const direct = new URL(url).pathname.match(/\/video\/(\d+)/);
+    if (direct) return direct[1];
+    // Short URLs (vm.tiktok.com, tiktok.com/t/xxx) — follow the redirect
+    const res = await fetch(url, {
+        redirect: 'follow',
+        headers: { 'User-Agent': TIKTOK_APP_UA }
+    });
+    const match = new URL(res.url).pathname.match(/\/video\/(\d+)/);
+    return match?.[1] ?? null;
+}
+
 async function handleTikTok(url) {
+    const awemeId = await resolveTikTokVideoId(url).catch(() => null);
+
+    if (awemeId) {
+        try {
+            const apiRes = await fetch(
+                `https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=${awemeId}` +
+                `&iid=7318518857994389254&device_id=7318517557120613121` +
+                `&channel=App&app_name=musical_ly&version_code=260202` +
+                `&device_platform=iphone&device_type=iPhone14,5&os_version=15.6.1`,
+                { headers: { 'User-Agent': TIKTOK_APP_UA } }
+            );
+
+            if (apiRes.ok) {
+                const apiData = await apiRes.json();
+                const item = apiData?.aweme_list?.[0];
+                const downloadUrl = item?.video?.play_addr?.url_list?.[0]
+                                 || item?.video?.download_addr?.url_list?.[0];
+
+                if (item && downloadUrl) {
+                    const rawDuration = item.video?.duration || 0;
+                    return {
+                        platform: 'tiktok',
+                        title: item.desc || 'TikTok Video',
+                        thumbnail: item.video?.cover?.url_list?.[0] || null,
+                        // TikTok API returns duration in milliseconds
+                        duration: rawDuration > 1000 ? Math.round(rawDuration / 1000) : rawDuration,
+                        author: item.author?.unique_id || item.author?.nickname || 'Unknown',
+                        downloadUrl
+                    };
+                }
+            }
+        } catch {}
+    }
+
+    // Fall back to TikWM if the direct API didn't work
     const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
     });
-    if (!res.ok) throw new Error('API bridge unavailable. Try again later.');
+    if (!res.ok) throw new Error('Could not fetch video info. Please try again.');
 
     const data = await res.json();
     if (data.code !== 0 || !data.data) throw new Error(data.msg || 'Could not find video data.');
