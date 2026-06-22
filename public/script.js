@@ -243,10 +243,16 @@
         checkBulkComplete();
     }
 
-    async function pollVmake(index, maxAttempts = 60) {
+    async function pollVmake(index) {
         const v = bulkVideos[index];
-        for (let i = 0; i < maxAttempts; i++) {
-            await delay(5000);
+        // Adaptive intervals: every 5s for first 2min, 10s up to 10min, 20s up to 30min
+        function pollInterval(attempt) {
+            if (attempt < 24) return 5000;
+            if (attempt < 78) return 10000;
+            return 20000;
+        }
+        for (let i = 0; ; i++) {
+            await delay(pollInterval(i));
             try {
                 const res  = await fetch(`/api/vmake?taskId=${encodeURIComponent(v.taskId)}&statusUrl=${encodeURIComponent(v.statusUrl)}`);
                 const data = await res.json();
@@ -258,6 +264,8 @@
                     refreshCard(index);
                     return;
                 }
+                // Update status text to show elapsed attempts
+                if (i > 0 && i % 6 === 0) refreshCard(index);
             } catch (err) {
                 v.status = 'error';
                 v.errorMsg = err.message;
@@ -265,9 +273,6 @@
                 return;
             }
         }
-        v.status = 'error';
-        v.errorMsg = 'Processing timed out';
-        refreshCard(index);
     }
 
     // ════════════════════════════════════════════════════════════════════════════

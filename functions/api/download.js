@@ -23,6 +23,25 @@ function jsonResponse(data, status = 200) {
     });
 }
 
+async function fetchVideoWithRetry(videoUrl, fetchHeaders, rangeHeader, maxAttempts = 5) {
+    const RETRY_DELAYS = [0, 2000, 4000, 8000, 15000];
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
+        try {
+            const headers = { ...fetchHeaders };
+            if (rangeHeader) headers['Range'] = rangeHeader;
+            const res = await fetch(videoUrl, { headers, redirect: 'follow' });
+            if (res.ok || res.status === 206) return res;
+            // 403 on TikTok CDN is permanent — don't retry
+            if (res.status === 403) return res;
+            // 404/503 on a freshly-processed VMake URL may just need a moment
+            if (attempt === maxAttempts - 1) return res;
+        } catch {
+            if (attempt === maxAttempts - 1) throw new Error('Proxy fetch failed after retries');
+        }
+    }
+}
+
 export async function onRequestGet(context) {
     const url = new URL(context.request.url);
     const videoUrl = url.searchParams.get('videoUrl');
@@ -42,9 +61,10 @@ export async function onRequestGet(context) {
             fetchHeaders['Referer'] = 'https://www.tiktok.com/';
         }
 
-        if (rangeHeader) fetchHeaders['Range'] = rangeHeader;
-
-        const videoRes = await fetch(videoUrl, { headers: fetchHeaders, redirect: 'follow' });
+        // Range requests: don't retry — byte-range responses must be exact
+        const videoRes = rangeHeader
+            ? await fetch(videoUrl, { headers: { ...fetchHeaders, Range: rangeHeader }, redirect: 'follow' })
+            : await fetchVideoWithRetry(videoUrl, fetchHeaders, null);
 
         if (videoRes.status === 403 && isTikTokCdnUrl(videoUrl)) {
             return Response.redirect(videoUrl, 302);
