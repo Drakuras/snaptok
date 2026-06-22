@@ -17,10 +17,112 @@ function detectPlatform(url) {
 }
 
 const TIKTOK_APP_UA = 'TikTok 26.2.0 rv:262018 (iPhone; iOS 14.4.2; en_US) Cronet';
+const BROWSER_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+// Normalise TikTok's inconsistent field shapes — string, object with urlList, or array
+function extractUrl(field) {
+    if (!field) return null;
+    if (typeof field === 'string') return field;
+    if (Array.isArray(field) && field.length) return field[0];
+    if (field.urlList?.length) return field.urlList[0];
+    if (field.url_list?.length) return field.url_list[0];
+    return null;
+}
+
+// Try TikTok's internal mobile API across multiple regional endpoints
+async function tryMobileApi(awemeId) {
+    const endpoints = [
+        'https://api16-normal-c-useast1a.tiktokv.com',
+        'https://api22-normal-c-useast2a.tiktokv.com',
+        'https://api19-normal-c-useast1a.tiktokv.com',
+    ];
+    const qs = new URLSearchParams({
+        aweme_id: awemeId,
+        iid: '7318518857994389254',
+        device_id: '7318517557120613121',
+        channel: 'App',
+        app_name: 'musical_ly',
+        version_code: '260202',
+        device_platform: 'iphone',
+        device_type: 'iPhone14,5',
+        os_version: '15.6.1',
+    }).toString();
+
+    for (const base of endpoints) {
+        try {
+            const res = await fetch(`${base}/aweme/v1/feed/?${qs}`, {
+                headers: { 'User-Agent': TIKTOK_APP_UA },
+            });
+            if (!res.ok) continue;
+            const data = await res.json();
+            const item = data?.aweme_list?.[0];
+            const downloadUrl = item?.video?.play_addr?.url_list?.[0]
+                             || item?.video?.download_addr?.url_list?.[0];
+            if (item && downloadUrl) return { item, downloadUrl };
+        } catch {}
+    }
+    return null;
+}
+
+// Scrape TikTok page HTML and pull video data from the embedded JSON blobs —
+// avoids any third-party API and works from any IP that can load tiktok.com
+async function scrapeTikTokPage(url) {
+    try {
+        const res = await fetch(url, {
+            headers: {
+                'User-Agent': BROWSER_UA,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Sec-Fetch-Mode': 'navigate',
+            },
+            redirect: 'follow',
+        });
+        if (!res.ok) return null;
+
+        const html = await res.text();
+        let item = null;
+
+        // Current TikTok format
+        const universalMatch = html.match(/<script id="__UNIVERSAL_DATA_FOR_REHYDRATION__"[^>]*>([\s\S]*?)<\/script>/);
+        if (universalMatch) {
+            try {
+                const data = JSON.parse(universalMatch[1]);
+                item = data?.['webapp.video-detail']?.itemInfo?.itemStruct;
+            } catch {}
+        }
+
+        // Older TikTok format
+        if (!item) {
+            const sigiMatch = html.match(/<script id="__SIGI_STATE__"[^>]*>([\s\S]*?)<\/script>/);
+            if (sigiMatch) {
+                try {
+                    const data = JSON.parse(sigiMatch[1]);
+                    const itemModule = data?.ItemModule;
+                    if (itemModule) item = Object.values(itemModule)[0];
+                } catch {}
+            }
+        }
+
+        if (!item) return null;
+
+        const downloadUrl = extractUrl(item.video?.downloadAddr)
+                         || extractUrl(item.video?.playAddr);
+        if (!downloadUrl) return null;
+
+        return {
+            downloadUrl,
+            title: item.desc || null,
+            author: item.author?.uniqueId || item.author?.nickname || null,
+            thumbnail: extractUrl(item.video?.cover) || extractUrl(item.video?.originCover) || null,
+            duration: item.video?.duration || 0,
+        };
+    } catch {
+        return null;
+    }
+}
 
 async function handleTikTok(url) {
-    // Step 1: oEmbed resolves any URL format (short links, long URLs) from any IP
-    // and gives us the video ID embedded in the HTML field plus metadata.
+    // Step 1: oEmbed — resolves any URL format and gives metadata + aweme_id
     let awemeId = null;
     let meta = {};
     try {
@@ -32,59 +134,41 @@ async function handleTikTok(url) {
         }
     } catch {}
 
-    // Fallback ID extraction for standard long-form URLs
     if (!awemeId) {
         awemeId = new URL(url).pathname.match(/\/video\/(\d+)/)?.[1] ?? null;
     }
 
-    // Step 2: call TikTok's own mobile API with the resolved ID — no IP-based rate limit
+    // Step 2: TikTok's own mobile API across multiple regional endpoints
     if (awemeId) {
-        try {
-            const apiRes = await fetch(
-                `https://api16-normal-c-useast1a.tiktokv.com/aweme/v1/feed/?aweme_id=${awemeId}` +
-                `&iid=7318518857994389254&device_id=7318517557120613121` +
-                `&channel=App&app_name=musical_ly&version_code=260202` +
-                `&device_platform=iphone&device_type=iPhone14,5&os_version=15.6.1`,
-                { headers: { 'User-Agent': TIKTOK_APP_UA } }
-            );
-            if (apiRes.ok) {
-                const apiData = await apiRes.json();
-                const item = apiData?.aweme_list?.[0];
-                const downloadUrl = item?.video?.play_addr?.url_list?.[0]
-                                 || item?.video?.download_addr?.url_list?.[0];
-                if (item && downloadUrl) {
-                    const rawDuration = item.video?.duration || 0;
-                    return {
-                        platform: 'tiktok',
-                        title: meta.title || item.desc || 'TikTok Video',
-                        thumbnail: meta.thumbnail || item.video?.cover?.url_list?.[0] || null,
-                        duration: rawDuration > 1000 ? Math.round(rawDuration / 1000) : rawDuration,
-                        author: meta.author || item.author?.unique_id || item.author?.nickname || 'Unknown',
-                        downloadUrl
-                    };
-                }
-            }
-        } catch {}
+        const apiResult = await tryMobileApi(awemeId);
+        if (apiResult) {
+            const { item, downloadUrl } = apiResult;
+            const rawDuration = item.video?.duration || 0;
+            return {
+                platform: 'tiktok',
+                title: meta.title || item.desc || 'TikTok Video',
+                thumbnail: meta.thumbnail || item.video?.cover?.url_list?.[0] || null,
+                duration: rawDuration > 1000 ? Math.round(rawDuration / 1000) : rawDuration,
+                author: meta.author || item.author?.unique_id || item.author?.nickname || 'Unknown',
+                downloadUrl,
+            };
+        }
     }
 
-    // Step 3: last resort — TikWM (may be rate-limited on shared CF IPs)
-    const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' }
-    });
-    if (!res.ok) throw new Error('Could not fetch video info. Please try again.');
+    // Step 3: Scrape the TikTok page HTML directly — no third-party API, no rate limits
+    const scraped = await scrapeTikTokPage(url);
+    if (scraped?.downloadUrl) {
+        return {
+            platform: 'tiktok',
+            title: meta.title || scraped.title || 'TikTok Video',
+            thumbnail: meta.thumbnail || scraped.thumbnail || null,
+            duration: scraped.duration || 0,
+            author: meta.author || scraped.author || 'Unknown',
+            downloadUrl: scraped.downloadUrl,
+        };
+    }
 
-    const data = await res.json();
-    if (data.code !== 0 || !data.data) throw new Error(data.msg || 'Could not find video data.');
-
-    const v = data.data;
-    return {
-        platform: 'tiktok',
-        title: v.title || 'TikTok Video',
-        thumbnail: v.cover || null,
-        duration: v.duration || 0,
-        author: v.author?.unique_id || v.author?.nickname || 'Unknown',
-        downloadUrl: v.play || v.wmplay || v.hdplay || null
-    };
+    throw new Error('Could not extract video info. TikTok may be geo-blocking this server — try again in a moment.');
 }
 
 function extractYouTubeId(url) {
