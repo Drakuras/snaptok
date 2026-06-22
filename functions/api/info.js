@@ -185,7 +185,24 @@ async function tryTikWM(url, apiKey) {
     }
 }
 
+async function resolveShortUrl(url) {
+    try {
+        const res = await fetch(url, {
+            method: 'HEAD', redirect: 'follow',
+            headers: { 'User-Agent': MOBILE_UA },
+        });
+        return res.url || url;
+    } catch {
+        return url;
+    }
+}
+
 async function handleTikTok(url, tikwmKey) {
+    // Resolve tiktok.com/t/... short links to full video URLs before anything else
+    if (/tiktok\.com\/t\//i.test(url)) {
+        url = await resolveShortUrl(url);
+    }
+
     // Step 1: oEmbed — resolves any URL format, gives metadata + aweme_id
     let awemeId = null;
     let meta = {};
