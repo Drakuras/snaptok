@@ -154,6 +154,7 @@
     // ════════════════════════════════════════════════════════════════════════════
 
     selectAllWm.addEventListener('change', () => {
+        const toProcess = [];
         bulkVideos.forEach((v, i) => {
             if (v.status === 'ready' || v.status === 'done') {
                 v.wm = selectAllWm.checked;
@@ -163,13 +164,22 @@
                     if (cb) cb.checked = v.wm;
                     el.classList.toggle('wm-enabled', v.wm);
                 }
+                if (v.wm && v.status === 'ready') toProcess.push(i);
             }
         });
+        toProcess.forEach(i => processWithVmake(i));
     });
 
     function syncSelectAll() {
         const eligible = bulkVideos.filter(v => v.status === 'ready' || v.status === 'done');
         selectAllWm.checked = eligible.length > 0 && eligible.every(v => v.wm);
+    }
+
+    function checkBulkComplete() {
+        const allSettled = bulkVideos.length > 0 && bulkVideos.every(
+            v => v.status === 'done' || v.status === 'error' || (v.status === 'ready' && !v.wm)
+        );
+        if (allSettled) downloadAllBtn.hidden = false;
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -188,15 +198,13 @@
         await Promise.all(bulkVideos.map((v, i) => {
             if (v.status !== 'ready') return Promise.resolve();
             if (v.wm) return processWithVmake(i);
-            // No watermark removal: mark as done immediately
             v.status = 'done';
             refreshCard(i);
             return Promise.resolve();
         }));
 
         processAllBtn.disabled = false;
-        const allDone = bulkVideos.every(v => v.status === 'done' || v.status === 'error');
-        if (allDone) downloadAllBtn.hidden = false;
+        checkBulkComplete();
     }
 
     async function processWithVmake(index) {
@@ -232,6 +240,7 @@
             v.errorMsg = err.message;
             refreshCard(index);
         }
+        checkBulkComplete();
     }
 
     async function pollVmake(index, maxAttempts = 60) {
@@ -267,7 +276,8 @@
 
     downloadAllBtn.addEventListener('click', () => {
         bulkVideos.forEach((v, i) => {
-            if (v.status !== 'done') return;
+            const canDl = v.status === 'done' || (v.status === 'ready' && !v.wm);
+            if (!canDl) return;
             const finalUrl = v.processedUrl || v.downloadUrl;
             if (!finalUrl) return;
             const title = v.info?.title || `video_${i + 1}`;
@@ -309,6 +319,7 @@
 
         const isDone    = v.status === 'done';
         const isReady   = v.status === 'ready';
+        const canDownload = isDone || (isReady && !v.wm);
         const finalUrl  = v.processedUrl || v.downloadUrl || '';
         const previewUrl = v.processedUrl
             ? v.processedUrl
@@ -332,13 +343,13 @@
                     </div>
                 </label>
                 <div class="card-btn-group">
-                    <button class="card-btn card-btn-preview" ${!isDone ? 'disabled' : ''} data-preview="${escHtml(previewUrl)}" data-title="${escHtml(v.info?.title || '')}">
+                    <button class="card-btn card-btn-preview" ${!canDownload ? 'disabled' : ''} data-preview="${escHtml(previewUrl)}" data-title="${escHtml(v.info?.title || '')}">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <polygon points="5 3 19 12 5 21 5 3"/>
                         </svg>
                         Preview
                     </button>
-                    <button class="card-btn card-btn-download" ${!isDone ? 'disabled' : ''} data-url="${escHtml(finalUrl)}" data-title="${escHtml(v.info?.title || `video_${index + 1}`)}">
+                    <button class="card-btn card-btn-download" ${!canDownload ? 'disabled' : ''} data-url="${escHtml(finalUrl)}" data-title="${escHtml(v.info?.title || `video_${index + 1}`)}">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                             <polyline points="7 10 12 15 17 10"/>
@@ -356,6 +367,8 @@
                 v.wm = cb.checked;
                 el.classList.toggle('wm-enabled', v.wm);
                 syncSelectAll();
+                if (v.wm && v.status === 'ready') processWithVmake(index);
+                else if (!v.wm) refreshCard(index); // re-enable download button immediately
             });
         }
 
