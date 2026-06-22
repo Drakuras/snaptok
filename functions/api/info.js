@@ -161,10 +161,12 @@ async function scrapeTikTokPage(url, awemeId) {
 
 async function tryTikWM(url, apiKey) {
     try {
-        const qs = new URLSearchParams({ url, hd: '1' });
-        if (apiKey) qs.set('token', apiKey);
-        const res = await fetch(`https://www.tikwm.com/api/?${qs}`, {
-            headers: { 'User-Agent': BROWSER_UA },
+        const body = new URLSearchParams({ url, hd: '1' });
+        if (apiKey) body.set('token', apiKey);
+        const res = await fetch('https://www.tikwm.com/api/', {
+            method: 'POST',
+            headers: { 'User-Agent': BROWSER_UA, 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString(),
         });
         if (!res.ok) return null;
         const data = await res.json();
@@ -358,6 +360,8 @@ export async function onRequestPost(context) {
         return jsonResponse(result);
 
     } catch (err) {
-        return jsonResponse({ error: err.message || 'Failed to process video info.' }, 500);
+        const tikwmKey = context.env.TIKWM_KEY || null;
+        const msg = err.message || 'Failed to process video info.';
+        return jsonResponse({ error: `${msg} [tikwm_key:${tikwmKey ? 'SET' : 'MISSING'}]` }, 500);
     }
 }
