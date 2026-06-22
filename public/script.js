@@ -23,10 +23,11 @@
     const bulkFetchBtn  = document.getElementById('bulkFetchBtn');
     const bulkResults   = document.getElementById('bulkResults');
     const bulkErrorMsg  = document.getElementById('bulkErrorMsg');
-    const selectAllWm   = document.getElementById('selectAllWm');
-    const processAllBtn = document.getElementById('processAllBtn');
+    const selectAllWm    = document.getElementById('selectAllWm');
+    const retryFailedBtn = document.getElementById('retryFailedBtn');
+    const processAllBtn  = document.getElementById('processAllBtn');
     const downloadAllBtn = document.getElementById('downloadAllBtn');
-    const videoGrid     = document.getElementById('videoGrid');
+    const videoGrid      = document.getElementById('videoGrid');
 
     // ── Mode tab refs ───────────────────────────────────────────────────────────
     const modeTabs  = document.querySelectorAll('.mode-tab');
@@ -128,13 +129,18 @@
             videoGrid.appendChild(buildCard(i));
         });
 
-        // Fetch all in parallel
-        await Promise.all(urls.map((url, i) => fetchVideoInfo(url, i)));
+        // Stagger fetches 1s apart to avoid TikTok rate-limiting the datacenter IP
+        await Promise.all(urls.map((url, i) =>
+            delay(i * 1000).then(() => fetchVideoInfo(url, i))
+        ));
         setBulkFetchLoading(false);
         syncSelectAll();
+        updateRetryBtn();
     }
 
-    async function fetchVideoInfo(url, index) {
+    async function fetchVideoInfo(url, index, attempt = 0) {
+        const RETRY_DELAYS = [0, 3000, 6000];
+        const MAX_ATTEMPTS = RETRY_DELAYS.length;
         try {
             const res  = await fetch('/api/info', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
             const data = await res.json();
@@ -142,11 +148,19 @@
             bulkVideos[index].info = data;
             bulkVideos[index].downloadUrl = data.downloadUrl;
             bulkVideos[index].status = 'ready';
+            refreshCard(index);
         } catch (err) {
+            if (attempt < MAX_ATTEMPTS - 1) {
+                bulkVideos[index].errorMsg = `Retrying… (${attempt + 1}/${MAX_ATTEMPTS - 1})`;
+                bulkVideos[index].status = 'error';
+                refreshCard(index);
+                await delay(RETRY_DELAYS[attempt + 1]);
+                return fetchVideoInfo(url, index, attempt + 1);
+            }
             bulkVideos[index].status = 'error';
             bulkVideos[index].errorMsg = err.message;
+            refreshCard(index);
         }
-        refreshCard(index);
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -185,6 +199,29 @@
     // ════════════════════════════════════════════════════════════════════════════
     // Bulk mode — process
     // ════════════════════════════════════════════════════════════════════════════
+
+    retryFailedBtn.addEventListener('click', async () => {
+        const failed = bulkVideos
+            .map((v, i) => ({ v, i }))
+            .filter(({ v }) => v.status === 'error' && !v.downloadUrl);
+        if (!failed.length) return;
+        retryFailedBtn.disabled = true;
+        await Promise.all(failed.map(({ v, i }, si) =>
+            delay(si * 1000).then(() => {
+                v.status = 'fetching';
+                v.errorMsg = '';
+                refreshCard(i);
+                return fetchVideoInfo(v.url, i);
+            })
+        ));
+        retryFailedBtn.disabled = false;
+        syncSelectAll();
+        updateRetryBtn();
+    });
+
+    function updateRetryBtn() {
+        retryFailedBtn.hidden = !bulkVideos.some(v => v.status === 'error' && !v.downloadUrl);
+    }
 
     processAllBtn.addEventListener('click', processAll);
 
