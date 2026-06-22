@@ -159,17 +159,19 @@ async function scrapeTikTokPage(url, awemeId) {
     return null;
 }
 
-// Step 5: TikWM — third-party fallback, 10k req/day on free tier
-async function tryTikWM(url) {
+async function tryTikWM(url, apiKey) {
     try {
-        const res = await fetch(`https://www.tikwm.com/api/?url=${encodeURIComponent(url)}`, {
+        const qs = new URLSearchParams({ url, hd: '1' });
+        if (apiKey) qs.set('token', apiKey);
+        const res = await fetch(`https://www.tikwm.com/api/?${qs}`, {
             headers: { 'User-Agent': BROWSER_UA },
         });
         if (!res.ok) return null;
         const data = await res.json();
         if (data.code !== 0 || !data.data) return null;
         const v = data.data;
-        const downloadUrl = v.play || v.wmplay || v.hdplay || null;
+        // Prefer HD → standard → watermarked as last resort
+        const downloadUrl = v.hdplay || v.play || v.wmplay || null;
         if (!downloadUrl) return null;
         return {
             downloadUrl,
@@ -183,7 +185,7 @@ async function tryTikWM(url) {
     }
 }
 
-async function handleTikTok(url) {
+async function handleTikTok(url, tikwmKey) {
     // Step 1: oEmbed — resolves any URL format, gives metadata + aweme_id
     let awemeId = null;
     let meta = {};
@@ -210,6 +212,14 @@ async function handleTikTok(url) {
             downloadUrl: source.downloadUrl,
         };
     }
+
+    // When an API key is set, TikWM is the most reliable method — try it first
+    if (tikwmKey) {
+        const tikwm = await tryTikWM(url, tikwmKey);
+        if (tikwm?.downloadUrl) return buildResult(tikwm);
+    }
+
+    // Native TikTok methods (free, but blocked on some datacenter IPs)
 
     // Step 2: Mobile API (multiple regional endpoints)
     if (awemeId) {
@@ -244,9 +254,11 @@ async function handleTikTok(url) {
     const scraped = await scrapeTikTokPage(url, awemeId);
     if (scraped?.downloadUrl) return buildResult(scraped);
 
-    // Step 5: TikWM — last resort
-    const tikwm = await tryTikWM(url);
-    if (tikwm?.downloadUrl) return buildResult(tikwm);
+    // Step 5: TikWM free tier — last resort (10k req/day, no key)
+    if (!tikwmKey) {
+        const tikwm = await tryTikWM(url, null);
+        if (tikwm?.downloadUrl) return buildResult(tikwm);
+    }
 
     throw new Error('Could not extract video info. Please try again.');
 }
@@ -324,7 +336,8 @@ export async function onRequestPost(context) {
         const platform = detectPlatform(url);
         if (!platform) return jsonResponse({ error: 'Please provide a valid TikTok or YouTube URL.' }, 400);
 
-        const result = platform === 'youtube' ? await handleYouTube(url) : await handleTikTok(url);
+        const tikwmKey = context.env.TIKWM_KEY || null;
+        const result = platform === 'youtube' ? await handleYouTube(url) : await handleTikTok(url, tikwmKey);
         return jsonResponse(result);
 
     } catch (err) {
