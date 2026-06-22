@@ -814,16 +814,20 @@ footer p {
 
 /* ── Preview Modal ───────────────────────────────────────── */
 .modal-backdrop {
+  display: none;
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,0.75);
   backdrop-filter: blur(8px);
   z-index: 100;
-  display: flex;
   align-items: center;
   justify-content: center;
   padding: 24px;
   animation: fadeIn 0.2s ease;
+}
+
+.modal-backdrop:not([hidden]) {
+  display: flex;
 }
 
 .modal {
