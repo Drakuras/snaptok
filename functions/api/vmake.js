@@ -98,8 +98,8 @@ async function aiPost(ak, sk, url, body) {
 
 // ── API flow ──────────────────────────────────────────────────────────────────
 
-async function getAiPolicy(ak, sk) {
-    const config = await wapiPost(ak, sk, '/skill/config.json', { gid: '', version: 'v1.0.0' });
+async function getAiPolicy(ak, sk, gid) {
+    const config = await wapiPost(ak, sk, '/skill/config.json', { gid, version: 'v1.0.0' });
     const endpoint = config.algorithm?.regions?.[DEFAULT_REGION];
     if (!endpoint) throw new Error('No endpoint in skill config for region ' + DEFAULT_REGION);
 
@@ -131,11 +131,11 @@ function extractOutputUrls(body) {
     return out;
 }
 
-async function submitJob(ak, sk, videoUrl) {
-    const policy = await getAiPolicy(ak, sk);
+async function submitJob(ak, sk, gid, videoUrl) {
+    const policy = await getAiPolicy(ak, sk, gid);
 
     const consume = await wapiPost(ak, sk, '/skill/consume.json', {
-        url: videoUrl, task: TASK, gid: '',
+        url: videoUrl, task: TASK, gid,
     });
     const context = consume?.context ?? '';
 
@@ -174,14 +174,15 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 export async function onRequestPost(context) {
-    const ak = context.env.VMAKE_AK;
-    const sk = context.env.VMAKE_SK;
+    const ak  = context.env.VMAKE_AK;
+    const sk  = context.env.VMAKE_SK;
+    const gid = context.env.VMAKE_GID || ak; // GID required by VMake; fall back to AK if not set
     if (!ak || !sk) return json({ error: 'Set VMAKE_AK and VMAKE_SK in Cloudflare Pages env vars.' }, 500);
 
     try {
         const { videoUrl } = await context.request.json();
         if (!videoUrl) return json({ error: 'videoUrl is required' }, 400);
-        return json(await submitJob(ak, sk, videoUrl));
+        return json(await submitJob(ak, sk, gid, videoUrl));
     } catch (err) {
         return json({ error: err.message }, 500);
     }
