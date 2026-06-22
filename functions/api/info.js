@@ -162,10 +162,13 @@ async function scrapeTikTokPage(url, awemeId) {
 async function tryTikWM(url, apiKey) {
     try {
         const qs = new URLSearchParams({ url, hd: '1' });
-        if (apiKey) qs.set('token', apiKey);
-        const res = await fetch(`https://www.tikwm.com/api/?${qs}`, {
-            headers: { 'User-Agent': BROWSER_UA },
-        });
+        // Paid API (tikwmapi.com) uses a different domain + header auth
+        const endpoint = apiKey
+            ? 'https://api.tikwmapi.com/'
+            : 'https://www.tikwm.com/api/';
+        const headers = { 'User-Agent': BROWSER_UA };
+        if (apiKey) headers['x-tikwmapi-key'] = apiKey;
+        const res = await fetch(`${endpoint}?${qs}`, { headers });
         if (!res.ok) return null;
         const data = await res.json();
         if (data.code !== 0 || !data.data) return null;
