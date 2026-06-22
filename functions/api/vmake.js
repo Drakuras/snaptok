@@ -112,45 +112,41 @@ async function getAiPolicy(ak, sk, gid) {
 }
 
 function extractOutputUrls(body) {
+    // Mirrors the official SDK _extract_output_urls exactly
     const result = body?.data?.result;
     if (!result || typeof result !== 'object') return [];
+
     const out = [];
     const seen = new Set();
-    function add(v) {
+
+    function addUrl(v) {
         if (typeof v === 'string' && v.startsWith('http') && !seen.has(v)) {
             seen.add(v); out.push(v);
         }
     }
-    // Cover all known VMake response shapes
-    for (const k of ['url', 'video_url', 'video', 'output', 'output_url', 'urls', 'images', 'videos']) {
-        const val = result[k];
-        if (Array.isArray(val)) val.forEach(add); else add(val);
+    function addList(v) {
+        if (Array.isArray(v)) v.forEach(addUrl); else addUrl(v);
     }
-    // mtlab_res contains the actual AI output (may be object or JSON string)
-    let mtlabRes = result.mtlab_res;
-    if (typeof mtlabRes === 'string') { try { mtlabRes = JSON.parse(mtlabRes); } catch {} }
-    if (mtlabRes && typeof mtlabRes === 'object') {
-        for (const k of ['url', 'video_url', 'video', 'output', 'output_url', 'urls', 'videos']) {
-            const val = mtlabRes[k];
-            if (Array.isArray(val)) val.forEach(add); else add(val);
-        }
-        const mil2 = mtlabRes.media_info_list;
-        if (Array.isArray(mil2)) mil2.forEach(item => { add(item?.media_data); add(item?.url); add(item?.video_url); });
-        // Scan all string values inside mtlab_res
-        for (const v of Object.values(mtlabRes)) { if (typeof v === 'string') add(v); }
+    function fromMil(items) {
+        if (!Array.isArray(items)) return;
+        items.forEach(it => { if (it && typeof it === 'object') addUrl(it.media_data); });
     }
-    const mil = result.media_info_list ?? result.data?.media_info_list;
-    if (Array.isArray(mil)) mil.forEach(item => {
-        add(item?.media_data);
-        add(item?.url);
-        add(item?.video_url);
-    });
-    // Last resort: any string value at top level of result
-    if (!out.length) {
-        for (const v of Object.values(result)) {
-            if (typeof v === 'string') add(v);
-        }
-    }
+
+    // 1. Top-level url fields
+    addList(result.urls);
+    addList(result.images);
+    addList(result.videos);
+    addUrl(result.url);
+
+    // 2. result.media_info_list and result.data.media_info_list
+    fromMil(result.media_info_list);
+    const nestedData = result.data;
+    if (nestedData && typeof nestedData === 'object') fromMil(nestedData.media_info_list);
+
+    // 3. mtlab_res.media_info_list (SDK only checks this one field inside mtlab_res)
+    const mtlab = result.mtlab_res;
+    if (mtlab && typeof mtlab === 'object') fromMil(mtlab.media_info_list);
+
     return out;
 }
 
@@ -189,11 +185,7 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
         const urls = extractOutputUrls(data);
-        if (!urls.length) {
-            const r = data?.data?.result ?? {};
-            const dump = JSON.stringify(r).slice(0, 500);
-            throw new Error(`VMake done (status ${status}) but no output URL. Full result: ${dump}`);
-        }
+        if (!urls.length) throw new Error('VMake processing completed but returned no output URL');
         return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
@@ -205,13 +197,19 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
 export async function onRequestPost(context) {
     const ak  = context.env.VMAKE_AK;
     const sk  = context.env.VMAKE_SK;
-    const gid = context.env.VMAKE_GID || ak; // GID required by VMake; fall back to AK if not set
+    const gid = context.env.VMAKE_GID || ak;
     if (!ak || !sk) return json({ error: 'Set VMAKE_AK and VMAKE_SK in Cloudflare Pages env vars.' }, 500);
 
     try {
         const { videoUrl } = await context.request.json();
         if (!videoUrl) return json({ error: 'videoUrl is required' }, 400);
-        return json(await submitJob(ak, sk, gid, videoUrl));
+
+        // VMake can't fetch TikTok CDN URLs directly (blocked by TikTok).
+        // Route through our own /api/download proxy so VMake gets the actual bytes.
+        const origin = new URL(context.request.url).origin;
+        const proxyUrl = `${origin}/api/download?videoUrl=${encodeURIComponent(videoUrl)}&title=video`;
+
+        return json(await submitJob(ak, sk, gid, proxyUrl));
     } catch (err) {
         return json({ error: err.message }, 500);
     }
