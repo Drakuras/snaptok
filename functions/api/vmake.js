@@ -126,13 +126,26 @@ function extractOutputUrls(body) {
         const val = result[k];
         if (Array.isArray(val)) val.forEach(add); else add(val);
     }
+    // mtlab_res contains the actual AI output (may be object or JSON string)
+    let mtlabRes = result.mtlab_res;
+    if (typeof mtlabRes === 'string') { try { mtlabRes = JSON.parse(mtlabRes); } catch {} }
+    if (mtlabRes && typeof mtlabRes === 'object') {
+        for (const k of ['url', 'video_url', 'video', 'output', 'output_url', 'urls', 'videos']) {
+            const val = mtlabRes[k];
+            if (Array.isArray(val)) val.forEach(add); else add(val);
+        }
+        const mil2 = mtlabRes.media_info_list;
+        if (Array.isArray(mil2)) mil2.forEach(item => { add(item?.media_data); add(item?.url); add(item?.video_url); });
+        // Scan all string values inside mtlab_res
+        for (const v of Object.values(mtlabRes)) { if (typeof v === 'string') add(v); }
+    }
     const mil = result.media_info_list ?? result.data?.media_info_list;
     if (Array.isArray(mil)) mil.forEach(item => {
         add(item?.media_data);
         add(item?.url);
         add(item?.video_url);
     });
-    // Last resort: any string value in result that looks like a URL
+    // Last resort: any string value at top level of result
     if (!out.length) {
         for (const v of Object.values(result)) {
             if (typeof v === 'string') add(v);
@@ -176,7 +189,11 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
         const urls = extractOutputUrls(data);
-        if (!urls.length) throw new Error(`VMake done (status ${status}) but no output URL found. Result keys: ${Object.keys(data?.data?.result ?? {}).join(', ')}`);
+        if (!urls.length) {
+            const r = data?.data?.result ?? {};
+            const sub = r.mtlab_res && typeof r.mtlab_res === 'object' ? ` | mtlab_res keys: ${Object.keys(r.mtlab_res).join(', ')}` : ` | mtlab_res: ${JSON.stringify(r.mtlab_res)?.slice(0, 120)}`;
+            throw new Error(`VMake done (status ${status}) but no output URL. Result keys: ${Object.keys(r).join(', ')}${sub}`);
+        }
         return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
