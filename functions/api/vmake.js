@@ -191,8 +191,8 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
         const urls = extractOutputUrls(data);
         if (!urls.length) {
             const r = data?.data?.result ?? {};
-            const sub = r.mtlab_res && typeof r.mtlab_res === 'object' ? ` | mtlab_res keys: ${Object.keys(r.mtlab_res).join(', ')}` : ` | mtlab_res: ${JSON.stringify(r.mtlab_res)?.slice(0, 120)}`;
-            throw new Error(`VMake done (status ${status}) but no output URL. Result keys: ${Object.keys(r).join(', ')}${sub}`);
+            const dump = JSON.stringify(r).slice(0, 500);
+            throw new Error(`VMake done (status ${status}) but no output URL. Full result: ${dump}`);
         }
         return { done: true, videoUrl: urls[0] };
     }
