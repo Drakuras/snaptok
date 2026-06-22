@@ -164,7 +164,7 @@ async function submitJob(ak, sk, gid, videoUrl) {
 
     const invokeUrl = `${policy.url}/${policy.push_path}`;
     const result = await aiPost(ak, sk, invokeUrl, {
-        params: JSON.stringify({ parameter: { rsp_media_type: 'url' } }),
+        params: JSON.stringify({ parameter: { rsp_media_type: 'url', effect_model: 'video_remove_full', support_h_265: 1 } }),
         context,
         task: TASK,
         task_type: 'mtlab',
