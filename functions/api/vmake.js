@@ -121,13 +121,23 @@ function extractOutputUrls(body) {
             seen.add(v); out.push(v);
         }
     }
-    for (const k of ['urls', 'images', 'videos']) {
+    // Cover all known VMake response shapes
+    for (const k of ['url', 'video_url', 'video', 'output', 'output_url', 'urls', 'images', 'videos']) {
         const val = result[k];
         if (Array.isArray(val)) val.forEach(add); else add(val);
     }
-    add(result.url);
     const mil = result.media_info_list ?? result.data?.media_info_list;
-    if (Array.isArray(mil)) mil.forEach(item => add(item?.media_data));
+    if (Array.isArray(mil)) mil.forEach(item => {
+        add(item?.media_data);
+        add(item?.url);
+        add(item?.video_url);
+    });
+    // Last resort: any string value in result that looks like a URL
+    if (!out.length) {
+        for (const v of Object.values(result)) {
+            if (typeof v === 'string') add(v);
+        }
+    }
     return out;
 }
 
@@ -157,7 +167,8 @@ async function submitJob(ak, sk, gid, videoUrl) {
     }
     // Rare sync result
     const urls = extractOutputUrls(result);
-    return { done: true, videoUrl: urls[0] ?? null };
+    if (!urls.length) throw new Error(`VMake returned no output URL. Result keys: ${Object.keys(result?.data?.result ?? {}).join(', ')}`);
+    return { done: true, videoUrl: urls[0] };
 }
 
 async function pollStatus(ak, sk, taskId, statusUrl) {
@@ -165,7 +176,8 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
         const urls = extractOutputUrls(data);
-        return { done: true, videoUrl: urls[0] ?? null };
+        if (!urls.length) throw new Error(`VMake done (status ${status}) but no output URL found. Result keys: ${Object.keys(data?.data?.result ?? {}).join(', ')}`);
+        return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
     return { done: false, status };
