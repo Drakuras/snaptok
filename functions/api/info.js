@@ -161,12 +161,10 @@ async function scrapeTikTokPage(url, awemeId) {
 
 async function tryTikWM(url, apiKey) {
     try {
-        const body = new URLSearchParams({ url, hd: '1' });
-        if (apiKey) body.set('token', apiKey);
-        const res = await fetch('https://www.tikwm.com/api/', {
-            method: 'POST',
-            headers: { 'User-Agent': BROWSER_UA, 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString(),
+        const qs = new URLSearchParams({ url, hd: '1' });
+        if (apiKey) qs.set('token', apiKey);
+        const res = await fetch(`https://www.tikwm.com/api/?${qs}`, {
+            headers: { 'User-Agent': BROWSER_UA },
         });
         if (!res.ok) return null;
         const data = await res.json();
@@ -187,24 +185,7 @@ async function tryTikWM(url, apiKey) {
     }
 }
 
-async function resolveShortUrl(url) {
-    try {
-        const res = await fetch(url, {
-            method: 'HEAD', redirect: 'follow',
-            headers: { 'User-Agent': MOBILE_UA },
-        });
-        return res.url || url;
-    } catch {
-        return url;
-    }
-}
-
 async function handleTikTok(url, tikwmKey) {
-    // Resolve tiktok.com/t/... short links to full video URLs before anything else
-    if (/tiktok\.com\/t\//i.test(url)) {
-        url = await resolveShortUrl(url);
-    }
-
     // Step 1: oEmbed — resolves any URL format, gives metadata + aweme_id
     let awemeId = null;
     let meta = {};
@@ -273,11 +254,9 @@ async function handleTikTok(url, tikwmKey) {
     const scraped = await scrapeTikTokPage(url, awemeId);
     if (scraped?.downloadUrl) return buildResult(scraped);
 
-    // Step 5: TikWM free tier — last resort (10k req/day, no key)
-    if (!tikwmKey) {
-        const tikwm = await tryTikWM(url, null);
-        if (tikwm?.downloadUrl) return buildResult(tikwm);
-    }
+    // Step 5: TikWM — last resort (handles short URLs + redirects internally)
+    const tikwm = await tryTikWM(url, tikwmKey);
+    if (tikwm?.downloadUrl) return buildResult(tikwm);
 
     throw new Error('Could not extract video info. Please try again.');
 }
