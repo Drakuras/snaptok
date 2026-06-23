@@ -7,7 +7,7 @@
 const WAPI_HOST   = 'wapi-skill.vmake.ai';
 const STATUS_URL  = 'https://openapi.starii.com/api/sdk/task/status';
 const USER_AGENT = 'action-web-skill-v1.3.0';
-const TASK = 'videoscreenclear';
+const TASK_PRESET = 'videoscreenclear'; // key in config.algorithm.invoke
 const DEFAULT_REGION = 'cn-north-4';
 
 function json(data, status = 200) {
@@ -111,7 +111,9 @@ async function getAiPolicy(ak, sk, hintGid = '') {
     const cloud = apiMap?.order?.[0];
     const policy = apiMap?.[cloud];
     if (!policy?.url) throw new Error('Could not resolve AI policy from token_policy');
-    return { policy, gid, invokePresets: config.algorithm?.invoke ?? {} };
+    const preset = config.algorithm?.invoke?.[TASK_PRESET];
+    if (!preset?.task) throw new Error(`Task preset "${TASK_PRESET}" not found in skill config`);
+    return { policy, gid, preset };
 }
 
 function extractOutputUrls(body) {
@@ -154,22 +156,22 @@ function extractOutputUrls(body) {
 }
 
 async function submitJob(ak, sk, videoUrl) {
-    // GID comes back from skill/config.json — no external config needed
-    const { policy, gid, invokePresets } = await getAiPolicy(ak, sk);
+    // GID and task preset come from skill/config.json — no external config needed
+    const { policy, gid, preset } = await getAiPolicy(ak, sk);
 
     // consume.json needs the real GID; its context response is required by the invoke
     let context = '';
     try {
-        const consumeRaw = await wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK, gid });
+        const consumeRaw = await wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK_PRESET, gid });
         const consume = consumeRaw?.response ?? consumeRaw ?? {};
         context = consume.context ?? '';
     } catch {}
 
     const invokeUrl = `${policy.url}/${policy.push_path}`;
     const result = await aiPost(ak, sk, invokeUrl, {
-        params: JSON.stringify({ parameter: { rsp_media_type: 'url' } }),
+        params: JSON.stringify(preset.params),  // use exact params from server config
         context,
-        task: TASK,
+        task: preset.task,                      // /v1/videoscreenclear_async
         task_type: 'mtlab',
         sync_timeout: policy.sync_timeout,
         init_images: [{ url: videoUrl }],
@@ -180,7 +182,7 @@ async function submitJob(ak, sk, videoUrl) {
 
     const taskId = result.data?.result?.id ?? result.data?.task_id;
     if (taskId) {
-        return { taskId: String(taskId).trim(), statusUrl: STATUS_URL, _invokePresets: invokePresets };
+        return { taskId: String(taskId).trim(), statusUrl: STATUS_URL };
     }
 
     throw new Error(`VMake submit failed: ${JSON.stringify(result?.data ?? null).slice(0, 400)}`);
