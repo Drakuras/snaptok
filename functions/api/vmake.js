@@ -110,7 +110,7 @@ async function getAiPolicy(ak, sk, hintGid = '') {
     const apiMap = tp?.data?.mtai?.api;
     const cloud = apiMap?.order?.[0];
     const policy = apiMap?.[cloud];
-    if (!policy?.url) throw new Error('Could not resolve AI policy from token_policy');
+    if (!policy?.url) throw new Error(`Could not resolve AI policy. invoke_presets=${JSON.stringify(config.algorithm?.invoke ?? null)}`);
     return { policy, gid };
 }
 
@@ -167,7 +167,7 @@ async function submitJob(ak, sk, videoUrl) {
 
     const invokeUrl = `${policy.url}/${policy.push_path}`;
     const result = await aiPost(ak, sk, invokeUrl, {
-        params: JSON.stringify({ parameter: { rsp_media_type: 'url', effect_model: 'video_remove_full', support_h_265: 1 } }),
+        params: JSON.stringify({ parameter: { rsp_media_type: 'url' } }),
         context,
         task: TASK,
         task_type: 'mtlab',
@@ -191,7 +191,7 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
         const urls = extractOutputUrls(data);
-        if (!urls.length) throw new Error(`VMake done but no URL. Poll: ${JSON.stringify(data).slice(0, 400)}`);
+        if (!urls.length) throw new Error(`VMake done but no URL (status=${status}): ${JSON.stringify(data).slice(0, 600)}`);
         return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
