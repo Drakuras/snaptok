@@ -174,9 +174,13 @@ async function submitJob(ak, sk, gid, videoUrl) {
             statusUrl: `${policy.url}/${policy.status_query.path}`,
         };
     }
-    // Rare sync result
+    // Sync result (status was not 9)
     const urls = extractOutputUrls(result);
-    if (!urls.length) throw new Error(`VMake returned no output URL. Result keys: ${Object.keys(result?.data?.result ?? {}).join(', ')}`);
+    if (!urls.length) {
+        const status = result?.data?.status;
+        const r = result?.data?.result ?? {};
+        throw new Error(`VMake sync: status=${status} mtlab_res=${JSON.stringify(r.mtlab_res).slice(0, 400)} data=${JSON.stringify(r.data).slice(0, 200)}`);
+    }
     return { done: true, videoUrl: urls[0] };
 }
 
