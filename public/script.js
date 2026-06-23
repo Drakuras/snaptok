@@ -293,7 +293,6 @@
             try {
                 const res  = await fetch(`/api/vmake?taskId=${encodeURIComponent(v.taskId)}&statusUrl=${encodeURIComponent(v.statusUrl)}`);
                 const data = await res.json();
-                console.log('[VMake poll]', i, data);
                 if (data.error) throw new Error(data.error);
                 if (data.done) {
                     if (data.failed) throw new Error(data.error || 'VMake processing failed');

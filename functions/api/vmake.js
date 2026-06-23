@@ -193,11 +193,11 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
         const urls = extractOutputUrls(data);
-        if (!urls.length) throw new Error(`VMake done but no URL (status=${status}): ${JSON.stringify(data).slice(0, 600)}`);
+        if (!urls.length) throw new Error('Watermark removal completed but no output URL was returned');
         return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
-    return { done: false, status, _debug: JSON.stringify(data).slice(0, 600) };
+    return { done: false, status };
 }
 
 // ── Route handlers ────────────────────────────────────────────────────────────
