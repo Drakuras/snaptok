@@ -175,9 +175,8 @@ async function submitJob(ak, sk, gid, videoUrl) {
     // Sync result (status was not 9)
     const urls = extractOutputUrls(result);
     if (!urls.length) {
-        const status = result?.data?.status;
-        const r = result?.data?.result ?? {};
-        throw new Error(`VMake sync: status=${status} mtlab_res=${JSON.stringify(r.mtlab_res).slice(0, 400)} data=${JSON.stringify(r.data).slice(0, 200)}`);
+        const dump = JSON.stringify(result?.data ?? result ?? null).slice(0, 600);
+        throw new Error(`VMake sync no-url: ${dump}`);
     }
     return { done: true, videoUrl: urls[0] };
 }
