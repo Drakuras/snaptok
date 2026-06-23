@@ -267,6 +267,7 @@
             }
 
             v.taskId    = submitData.taskId;
+            v.recordId  = submitData.recordId ?? submitData.taskId;
             v.statusUrl = submitData.statusUrl;
             refreshCard(index);
 
@@ -291,8 +292,9 @@
         for (let i = 0; ; i++) {
             await delay(pollInterval(i));
             try {
-                const res  = await fetch(`/api/vmake?taskId=${encodeURIComponent(v.taskId)}&statusUrl=${encodeURIComponent(v.statusUrl)}`);
+                const res  = await fetch(`/api/vmake?taskId=${encodeURIComponent(v.taskId)}&recordId=${encodeURIComponent(v.recordId)}&statusUrl=${encodeURIComponent(v.statusUrl)}`);
                 const data = await res.json();
+                console.log('[VMake poll]', i, data);
                 if (data.error) throw new Error(data.error);
                 if (data.done) {
                     if (data.failed) throw new Error(data.error || 'VMake processing failed');
