@@ -190,32 +190,7 @@ async function submitJob(ak, sk, gid, videoUrl) {
     throw new Error(`VMake submit: no task ID or URLs. Response: ${JSON.stringify(result?.data ?? null).slice(0, 400)} consume_recordId=${recordId}`);
 }
 
-async function pollStatus(ak, sk, taskId, recordId, statusUrl) {
-    // Try WAPI query.json first — this is what VMake's own frontend uses
-    try {
-        const wapi = await wapiPost(ak, sk, '/vm/tool/query.json', {
-            record_id: [recordId],
-            client_os: 'web',
-        }, WAPI_MAIN_HOST);
-
-        const item = wapi?.response?.list?.[0] ?? wapi?.data?.list?.[0] ?? wapi?.list?.[0];
-        if (item) {
-            const taskStatus = item.status ?? item.task_status;
-            if (taskStatus === 'success' || taskStatus === 3 || taskStatus === 'done') {
-                const url = item.result_url ?? item.video_url ?? item.url
-                    ?? item.result?.url ?? item.result?.video_url;
-                if (url) return { done: true, videoUrl: url };
-                return { done: true, failed: true, error: 'WAPI query: no output URL in completed task' };
-            }
-            if (taskStatus === 'failed' || taskStatus === 4 || taskStatus === 'error') {
-                return { done: true, failed: true, error: `VMake processing failed (WAPI status: ${taskStatus})` };
-            }
-            return { done: false, status: taskStatus, _debug: JSON.stringify(wapi).slice(0, 400) };
-        }
-        // WAPI returned but no list item — fall through to SDK status poll
-    } catch {}
-
-    // Fallback: SDK AI status endpoint
+async function pollStatus(ak, sk, taskId, statusUrl) {
     const data = await aiGet(ak, sk, `${statusUrl}?task_id=${taskId}`);
     const status = data?.data?.status;
     if (status === 10 || status === 2 || status === 20) {
@@ -224,7 +199,7 @@ async function pollStatus(ak, sk, taskId, recordId, statusUrl) {
         return { done: true, videoUrl: urls[0] };
     }
     if (status === 3) return { done: true, failed: true, error: 'VMake processing failed' };
-    return { done: false, status, _debug: JSON.stringify(data).slice(0, 400) };
+    return { done: false, status, _debug: JSON.stringify(data).slice(0, 600) };
 }
 
 // ── Route handlers ────────────────────────────────────────────────────────────
@@ -251,13 +226,12 @@ export async function onRequestGet(context) {
     if (!ak || !sk) return json({ error: 'Set VMAKE_AK and VMAKE_SK in Cloudflare Pages env vars.' }, 500);
 
     const params = new URL(context.request.url).searchParams;
-    const taskId   = params.get('taskId');
-    const recordId = params.get('recordId') ?? params.get('taskId');
+    const taskId    = params.get('taskId');
     const statusUrl = params.get('statusUrl');
     if (!taskId || !statusUrl) return json({ error: 'taskId and statusUrl are required' }, 400);
 
     try {
-        return json(await pollStatus(ak, sk, taskId, recordId, decodeURIComponent(statusUrl)));
+        return json(await pollStatus(ak, sk, taskId, decodeURIComponent(statusUrl)));
     } catch (err) {
         return json({ error: err.message }, 500);
     }
