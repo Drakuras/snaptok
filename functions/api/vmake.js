@@ -166,19 +166,20 @@ async function submitJob(ak, sk, gid, videoUrl) {
         init_images: [{ url: videoUrl }],
     });
 
-    if (result.data?.status === 9) {
+    // If URLs are already in the response (rare sync completion), return immediately
+    const urls = extractOutputUrls(result);
+    if (urls.length) return { done: true, videoUrl: urls[0] };
+
+    // Task submitted for async processing — grab the task ID (present in status 9 and status 2)
+    const taskId = result.data?.result?.id ?? result.data?.task_id;
+    if (taskId) {
         return {
-            taskId: String(result.data.result.id).trim(),
+            taskId: String(taskId).trim(),
             statusUrl: `${policy.url}/${policy.status_query.path}`,
         };
     }
-    // Sync result (status was not 9)
-    const urls = extractOutputUrls(result);
-    if (!urls.length) {
-        const dump = JSON.stringify(result?.data ?? result ?? null).slice(0, 600);
-        throw new Error(`VMake sync no-url: ${dump}`);
-    }
-    return { done: true, videoUrl: urls[0] };
+
+    throw new Error(`VMake submit: no task ID or URLs. Response: ${JSON.stringify(result?.data ?? null).slice(0, 400)}`);
 }
 
 async function pollStatus(ak, sk, taskId, statusUrl) {
