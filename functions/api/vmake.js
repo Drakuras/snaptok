@@ -153,15 +153,13 @@ function extractOutputUrls(body) {
 async function submitJob(ak, sk, gid, videoUrl) {
     const policy = await getAiPolicy(ak, sk, gid);
 
-    const consume = await wapiPost(ak, sk, '/skill/consume.json', {
-        url: videoUrl, task: TASK, gid,
-    });
-    const context = consume?.context ?? '';
+    // Call consume.json for billing/quota tracking (fire-and-forget; don't use its response as context)
+    wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK, gid }).catch(() => {});
 
     const invokeUrl = `${policy.url}/${policy.push_path}`;
     const result = await aiPost(ak, sk, invokeUrl, {
         params: JSON.stringify({ parameter: { rsp_media_type: 'url', effect_model: 'video_remove_full', support_h_265: 1 } }),
-        context,
+        context: '',   // SDK always passes empty string; consume.json context causes GATEWAY_AUTHORIZED_ERROR
         task: TASK,
         task_type: 'mtlab',
         sync_timeout: policy.sync_timeout,
