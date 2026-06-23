@@ -258,6 +258,7 @@
             });
             const submitData = await submitRes.json();
             if (!submitRes.ok || submitData.error) throw new Error(submitData.error || 'Submit failed');
+            console.log('[VMake submit]', submitData._invokePresets);
 
             if (submitData.done) {
                 v.processedUrl = submitData.videoUrl;

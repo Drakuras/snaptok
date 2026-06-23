@@ -110,8 +110,8 @@ async function getAiPolicy(ak, sk, hintGid = '') {
     const apiMap = tp?.data?.mtai?.api;
     const cloud = apiMap?.order?.[0];
     const policy = apiMap?.[cloud];
-    if (!policy?.url) throw new Error(`Could not resolve AI policy. invoke_presets=${JSON.stringify(config.algorithm?.invoke ?? null)}`);
-    return { policy, gid };
+    if (!policy?.url) throw new Error('Could not resolve AI policy from token_policy');
+    return { policy, gid, invokePresets: config.algorithm?.invoke ?? {} };
 }
 
 function extractOutputUrls(body) {
@@ -155,7 +155,7 @@ function extractOutputUrls(body) {
 
 async function submitJob(ak, sk, videoUrl) {
     // GID comes back from skill/config.json — no external config needed
-    const { policy, gid } = await getAiPolicy(ak, sk);
+    const { policy, gid, invokePresets } = await getAiPolicy(ak, sk);
 
     // consume.json needs the real GID; its context response is required by the invoke
     let context = '';
@@ -180,7 +180,7 @@ async function submitJob(ak, sk, videoUrl) {
 
     const taskId = result.data?.result?.id ?? result.data?.task_id;
     if (taskId) {
-        return { taskId: String(taskId).trim(), statusUrl: STATUS_URL };
+        return { taskId: String(taskId).trim(), statusUrl: STATUS_URL, _invokePresets: invokePresets };
     }
 
     throw new Error(`VMake submit failed: ${JSON.stringify(result?.data ?? null).slice(0, 400)}`);
