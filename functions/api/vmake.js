@@ -4,8 +4,8 @@
 //   VMAKE_AK  → your Access Key  (MT_AK from VMake developer dashboard)
 //   VMAKE_SK  → your Secret Key  (MT_SK from VMake developer dashboard)
 
-const WAPI_HOST      = 'wapi-skill.vmake.ai';
-const WAPI_MAIN_HOST = 'wapi.vmake.ai';
+const WAPI_HOST   = 'wapi-skill.vmake.ai';
+const STATUS_URL  = 'https://openapi.starii.com/api/sdk/task/status';
 const USER_AGENT = 'action-web-skill-v1.3.0';
 const TASK = 'videoscreenclear';
 const DEFAULT_REGION = 'cn-north-4';
@@ -182,8 +182,7 @@ async function submitJob(ak, sk, gid, videoUrl) {
     if (taskId) {
         return {
             taskId: String(taskId).trim(),
-            recordId: recordId ?? String(taskId).trim(),
-            statusUrl: `${policy.url}/${policy.status_query.path}`,
+            statusUrl: STATUS_URL,
         };
     }
 
