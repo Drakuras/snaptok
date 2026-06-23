@@ -208,12 +208,7 @@ export async function onRequestPost(context) {
         const { videoUrl } = await context.request.json();
         if (!videoUrl) return json({ error: 'videoUrl is required' }, 400);
 
-        // VMake can't fetch TikTok CDN URLs directly (blocked by TikTok).
-        // Route through our own /api/download proxy so VMake gets the actual bytes.
-        const origin = new URL(context.request.url).origin;
-        const proxyUrl = `${origin}/api/download?videoUrl=${encodeURIComponent(videoUrl)}&title=video`;
-
-        return json(await submitJob(ak, sk, gid, proxyUrl));
+        return json(await submitJob(ak, sk, gid, videoUrl));
     } catch (err) {
         return json({ error: err.message }, 500);
     }
