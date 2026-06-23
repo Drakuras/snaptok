@@ -97,10 +97,12 @@ async function aiPost(ak, sk, url, body) {
 
 // ── API flow ──────────────────────────────────────────────────────────────────
 
-async function getAiPolicy(ak, sk, gid) {
-    const raw = await wapiPost(ak, sk, '/skill/config.json', { gid, version: 'v1.0.0' });
+async function getAiPolicy(ak, sk, hintGid = '') {
+    const raw = await wapiPost(ak, sk, '/skill/config.json', { gid: hintGid, version: 'v1.0.0' });
     if (raw.meta?.code !== 0) throw new Error(raw.meta?.msg || 'skill/config.json failed');
     const config = raw.response ?? {};
+    // GID is returned by the API — we don't need to configure it externally
+    const gid = config.gid ?? hintGid;
     const endpoint = config.algorithm?.regions?.[DEFAULT_REGION];
     if (!endpoint) throw new Error('No endpoint in skill config for region ' + DEFAULT_REGION);
 
@@ -109,7 +111,7 @@ async function getAiPolicy(ak, sk, gid) {
     const cloud = apiMap?.order?.[0];
     const policy = apiMap?.[cloud];
     if (!policy?.url) throw new Error('Could not resolve AI policy from token_policy');
-    return policy;
+    return { policy, gid };
 }
 
 function extractOutputUrls(body) {
@@ -151,42 +153,37 @@ function extractOutputUrls(body) {
     return out;
 }
 
-async function submitJob(ak, sk, gid, videoUrl) {
-    const policy = await getAiPolicy(ak, sk, gid);
+async function submitJob(ak, sk, videoUrl) {
+    // GID comes back from skill/config.json — no external config needed
+    const { policy, gid } = await getAiPolicy(ak, sk);
 
-    // consume.json registers the job for billing; may return a record_id for WAPI query polling
-    let recordId = null;
+    // consume.json needs the real GID; its context response is required by the invoke
+    let context = '';
     try {
         const consumeRaw = await wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK, gid });
         const consume = consumeRaw?.response ?? consumeRaw ?? {};
-        recordId = consume.record_id ?? consume.id ?? null;
+        context = consume.context ?? '';
     } catch {}
-
 
     const invokeUrl = `${policy.url}/${policy.push_path}`;
     const result = await aiPost(ak, sk, invokeUrl, {
         params: JSON.stringify({ parameter: { rsp_media_type: 'url', effect_model: 'video_remove_full', support_h_265: 1 } }),
-        context: '',   // SDK always passes empty string; consume.json context causes GATEWAY_AUTHORIZED_ERROR
+        context,
         task: TASK,
         task_type: 'mtlab',
         sync_timeout: policy.sync_timeout,
         init_images: [{ url: videoUrl }],
     });
 
-    // If URLs are already in the response (rare sync completion), return immediately
     const urls = extractOutputUrls(result);
     if (urls.length) return { done: true, videoUrl: urls[0] };
 
-    // Task submitted for async processing — grab the task ID (present in status 9 and status 2)
     const taskId = result.data?.result?.id ?? result.data?.task_id;
     if (taskId) {
-        return {
-            taskId: String(taskId).trim(),
-            statusUrl: STATUS_URL,
-        };
+        return { taskId: String(taskId).trim(), statusUrl: STATUS_URL };
     }
 
-    throw new Error(`VMake submit: no task ID or URLs. Response: ${JSON.stringify(result?.data ?? null).slice(0, 400)} consume_recordId=${recordId}`);
+    throw new Error(`VMake submit failed: ${JSON.stringify(result?.data ?? null).slice(0, 400)}`);
 }
 
 async function pollStatus(ak, sk, taskId, statusUrl) {
@@ -204,16 +201,15 @@ async function pollStatus(ak, sk, taskId, statusUrl) {
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 export async function onRequestPost(context) {
-    const ak  = context.env.VMAKE_AK;
-    const sk  = context.env.VMAKE_SK;
-    const gid = context.env.VMAKE_GID || ak;
+    const ak = context.env.VMAKE_AK;
+    const sk = context.env.VMAKE_SK;
     if (!ak || !sk) return json({ error: 'Set VMAKE_AK and VMAKE_SK in Cloudflare Pages env vars.' }, 500);
 
     try {
         const { videoUrl } = await context.request.json();
         if (!videoUrl) return json({ error: 'videoUrl is required' }, 400);
 
-        return json(await submitJob(ak, sk, gid, videoUrl));
+        return json(await submitJob(ak, sk, videoUrl));
     } catch (err) {
         return json({ error: err.message }, 500);
     }
