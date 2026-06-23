@@ -98,7 +98,9 @@ async function aiPost(ak, sk, url, body) {
 // ── API flow ──────────────────────────────────────────────────────────────────
 
 async function getAiPolicy(ak, sk, gid) {
-    const config = await wapiPost(ak, sk, '/skill/config.json', { gid, version: 'v1.0.0' });
+    const raw = await wapiPost(ak, sk, '/skill/config.json', { gid, version: 'v1.0.0' });
+    if (raw.meta?.code !== 0) throw new Error(raw.meta?.msg || 'skill/config.json failed');
+    const config = raw.response ?? {};
     const endpoint = config.algorithm?.regions?.[DEFAULT_REGION];
     if (!endpoint) throw new Error('No endpoint in skill config for region ' + DEFAULT_REGION);
 
@@ -155,8 +157,9 @@ async function submitJob(ak, sk, gid, videoUrl) {
     // consume.json registers the job for billing; may return a record_id for WAPI query polling
     let recordId = null;
     try {
-        const consume = await wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK, gid });
-        recordId = consume?.response?.record_id ?? consume?.record_id ?? null;
+        const consumeRaw = await wapiPost(ak, sk, '/skill/consume.json', { url: videoUrl, task: TASK, gid });
+        const consume = consumeRaw?.response ?? consumeRaw ?? {};
+        recordId = consume.record_id ?? consume.id ?? null;
     } catch {}
 
 
