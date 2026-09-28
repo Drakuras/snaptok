@@ -61,10 +61,19 @@ export async function onRequestGet(context) {
             fetchHeaders['Referer'] = 'https://www.tiktok.com/';
         }
 
-        // Range requests: don't retry — byte-range responses must be exact
-        const videoRes = rangeHeader
-            ? await fetch(videoUrl, { headers: { ...fetchHeaders, Range: rangeHeader }, redirect: 'follow' })
-            : await fetchVideoWithRetry(videoUrl, fetchHeaders, null);
+        // Range requests: don't retry — byte-range responses must be exact.
+        // TikTok CDN URLs are immediately fetchable; only freshly-processed VMake
+        // output needs the slow backoff for CDN propagation. Retrying TikTok CDN
+        // fetches on every non-200 response burns up to ~29s and trips Cloudflare's
+        // own gateway timeout (502), so give those a single fast attempt.
+        let videoRes;
+        if (rangeHeader) {
+            videoRes = await fetch(videoUrl, { headers: { ...fetchHeaders, Range: rangeHeader }, redirect: 'follow' });
+        } else if (isTikTokCdnUrl(videoUrl)) {
+            videoRes = await fetch(videoUrl, { headers: fetchHeaders, redirect: 'follow' });
+        } else {
+            videoRes = await fetchVideoWithRetry(videoUrl, fetchHeaders, null);
+        }
 
         if (videoRes.status === 403 && isTikTokCdnUrl(videoUrl)) {
             return Response.redirect(videoUrl, 302);
