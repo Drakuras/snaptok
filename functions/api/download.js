@@ -3,14 +3,22 @@
 
 const TIKTOK_UA = 'com.zhiliaoapp.musically/2022405040 (Linux; U; Android 12; en_US; Pixel 6 Build/SD1A.210817.036; Cronet/58.0.2991.0)';
 
+// Matches TikTok's own domain plus every ByteDance CDN family observed serving
+// video/audio/image assets — including region-sharded variants like
+// tiktokcdn-us.com / tiktokcdn-eu.com, which a plain "ends with tiktokcdn.com"
+// check misses entirely.
 function isTikTokCdnUrl(url) {
     try {
         const { hostname } = new URL(url);
-        return /tiktok\.com$/.test(hostname) ||
-            /tiktokcdn\.com$/.test(hostname) ||
-            /tiktokv\.com$/.test(hostname) ||
-            /snssdk\.com$/.test(hostname) ||
-            /ibytedtos\.com$/.test(hostname);
+        return /(^|\.)tiktok\.com$/.test(hostname) ||
+            /(^|\.)tiktokcdn(-[a-z0-9]+)?\.com$/.test(hostname) ||
+            /(^|\.)tiktokv(\.com|\.us)$/.test(hostname) ||
+            /(^|\.)tiktokcdn(-[a-z0-9]+)?\.us$/.test(hostname) ||
+            /(^|\.)snssdk\.com$/.test(hostname) ||
+            /(^|\.)ibytedtos\.com$/.test(hostname) ||
+            /(^|\.)ibyteimg\.com$/.test(hostname) ||
+            /(^|\.)muscdn\.com$/.test(hostname) ||
+            /(^|\.)byteoversea\.com$/.test(hostname);
     } catch {
         return false;
     }
@@ -23,14 +31,29 @@ function jsonResponse(data, status = 200) {
     });
 }
 
-async function fetchVideoWithRetry(videoUrl, fetchHeaders, rangeHeader, maxAttempts = 5) {
-    const RETRY_DELAYS = [0, 2000, 4000, 8000, 15000];
+// Per-attempt hard timeout so one stalled connection can't eat the whole
+// gateway budget by itself, independent of the retry count/backoff.
+async function fetchWithTimeout(videoUrl, headers, ms = 8000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+        return await fetch(videoUrl, { headers, redirect: 'follow', signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// Only used for non-TikTok (VMake) output URLs, which can need a moment to
+// propagate on their CDN right after processing. Kept short — total budget
+// well under Cloudflare's own gateway timeout even in the worst case.
+async function fetchVideoWithRetry(videoUrl, fetchHeaders, rangeHeader, maxAttempts = 4) {
+    const RETRY_DELAYS = [0, 1000, 3000, 6000];
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
         if (attempt > 0) await new Promise(r => setTimeout(r, RETRY_DELAYS[attempt]));
         try {
             const headers = { ...fetchHeaders };
             if (rangeHeader) headers['Range'] = rangeHeader;
-            const res = await fetch(videoUrl, { headers, redirect: 'follow' });
+            const res = await fetchWithTimeout(videoUrl, headers);
             if (res.ok || res.status === 206) return res;
             // 403 on TikTok CDN is permanent — don't retry
             if (res.status === 403) return res;
@@ -63,14 +86,12 @@ export async function onRequestGet(context) {
 
         // Range requests: don't retry — byte-range responses must be exact.
         // TikTok CDN URLs are immediately fetchable; only freshly-processed VMake
-        // output needs the slow backoff for CDN propagation. Retrying TikTok CDN
-        // fetches on every non-200 response burns up to ~29s and trips Cloudflare's
-        // own gateway timeout (502), so give those a single fast attempt.
+        // output needs the backoff for CDN propagation.
         let videoRes;
         if (rangeHeader) {
-            videoRes = await fetch(videoUrl, { headers: { ...fetchHeaders, Range: rangeHeader }, redirect: 'follow' });
+            videoRes = await fetchWithTimeout(videoUrl, { ...fetchHeaders, Range: rangeHeader });
         } else if (isTikTokCdnUrl(videoUrl)) {
-            videoRes = await fetch(videoUrl, { headers: fetchHeaders, redirect: 'follow' });
+            videoRes = await fetchWithTimeout(videoUrl, fetchHeaders);
         } else {
             videoRes = await fetchVideoWithRetry(videoUrl, fetchHeaders, null);
         }
